@@ -345,8 +345,8 @@ python scraper.py "AI engineer roles in Europe or remote"
 
 ```
 2025-12-18 21:21:24,009 [INFO] Starting ATS job scrape...
-2025-12-18 21:21:24,009 [INFO] Search query (for documentation/intention): AI engineer roles in Europe or remote
-2025-12-18 21:21:24,009 [INFO] Discovering jobs via search API (SerpAPI or Bing API)...
+2025-12-18 21:21:24,009 [INFO] Search query: AI engineer roles in Europe or remote
+2025-12-18 21:21:24,009 [INFO] Discovering jobs via search API...
 2025-12-18 21:21:24,009 [INFO] Searching for jobs via search API...
 2025-12-18 21:21:24,009 [INFO] Searching jobs.lever.co with query: site:jobs.lever.co ("AI" OR "Artificial Intelligence" OR "ML") AND ("Europe" OR "EU" OR "UK" OR "remote")
 2025-12-18 21:21:25,893 [INFO] SerpAPI returned 10 results for jobs.lever.co
@@ -492,31 +492,21 @@ python -c "import os; from dotenv import load_dotenv; load_dotenv(); print('SERP
 
 ### Adding New ATS Platforms
 
-1. Add domain to `ATS_DOMAINS` list in `scraper.py`:
+1. Add platform to `ATS_PLATFORMS` list in `scraper.py`:
 
 ```python
-ATS_DOMAINS = [
-    "jobs.lever.co",
-    "jobs.ashbyhq.com",
-    "your-new-platform.com",  # Add here
-]
-```
-
-2. Add platform to `ats_platforms` in `search_jobs_via_api()`:
-
-```python
-ats_platforms = [
+ATS_PLATFORMS = [
     ("jobs.lever.co", "lever"),
+    ("jobs.ashbyhq.com", "ashby"),
     ("your-new-platform.com", "newplatform"),  # Add here
 ]
 ```
 
-3. Add parsing logic in `enrich_job_from_url()` if needed:
+The search API will automatically discover jobs from the new platform. For better parsing, add platform-specific logic in `enrich_job_from_url()`:
 
 ```python
 elif source == "newplatform":
-    # Add parsing logic here
-    pass
+    enriched = _parse_newplatform_job_page(soup, url)
 ```
 
 ### Changing Filters
@@ -543,36 +533,30 @@ EUROPE_REMOTE_HINTS = [
 ]
 ```
 
-### Adding Slack/Email Notifications
+### Slack/Email Notifications (Already Implemented)
 
-**Slack Webhook Example:**
+The scraper includes optional Slack and Email notifications for new jobs.
 
-```python
-import requests
+**Slack Setup:**
 
-def send_to_slack(delta_df):
-    if delta_df.empty:
-        return
+1. Create a Slack webhook: https://api.slack.com/messaging/webhooks
+2. Add to `.env`:
+   ```bash
+   SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+   ```
 
-    webhook_url = os.getenv("SLACK_WEBHOOK_URL")
-    message = f"Found {len(delta_df)} new jobs!"
+**Email Setup:**
 
-    requests.post(webhook_url, json={"text": message})
-```
+1. Add email config to `.env`:
+   ```bash
+   EMAIL_HOST=smtp.gmail.com
+   EMAIL_PORT=587
+   EMAIL_USER=your-email@gmail.com
+   EMAIL_PASSWORD=your-app-password
+   EMAIL_TO=recipient@example.com
+   ```
 
-**Email Example:**
-
-```python
-import smtplib
-from email.mime.text import MIMEText
-
-def send_email(delta_df):
-    if delta_df.empty:
-        return
-
-    # Add email sending logic here
-    pass
-```
+Notifications are sent automatically when new jobs are found. If environment variables are not set, notifications are silently skipped.
 
 ## Performance
 

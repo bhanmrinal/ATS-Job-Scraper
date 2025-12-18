@@ -4,8 +4,10 @@ import hashlib
 import logging
 import os
 import re
+import smtplib
 import time
 from datetime import UTC, datetime
+from email.message import EmailMessage
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
@@ -560,6 +562,136 @@ def normalize_jobs(raw_jobs: List[Dict[str, str]]) -> pd.DataFrame:
 
 
 # ============================================================================
+# Notification Layer (Optional Bonus Features)
+# ============================================================================
+
+
+def send_slack_notification(delta_df: pd.DataFrame) -> None:
+    """Send Slack notification when new jobs are found. Silently skips if webhook not configured."""
+    webhook_url = os.getenv("SLACK_WEBHOOK_URL")
+    if not webhook_url:
+        return
+
+    try:
+        num_jobs = len(delta_df)
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        # Get top 3 jobs for preview
+        top_jobs = delta_df.head(3)
+        job_list = []
+        for _, job in top_jobs.iterrows():
+            title = str(job.get("title", "Unknown Title"))
+            company = str(job.get("company", "Unknown Company"))
+            if company == "Unknown":
+                company = "Unknown Company"
+            job_list.append(f"• {title} @ {company}")
+
+        job_preview = "\n".join(job_list)
+        if num_jobs > 3:
+            job_preview += f"\n... and {num_jobs - 3} more"
+
+        message = {
+            "text": "New ATS Jobs Found",
+            "blocks": [
+                {
+                    "type": "header",
+                    "text": {"type": "plain_text", "text": "New ATS Jobs Found"},
+                },
+                {
+                    "type": "section",
+                    "fields": [
+                        {"type": "mrkdwn", "text": f"*New Jobs:* {num_jobs}"},
+                        {"type": "mrkdwn", "text": f"*Time:* {timestamp}"},
+                    ],
+                },
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"*Top Jobs:*\n{job_preview}"},
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"Full details in: `{DELTA_CSV_PATH}`",
+                    },
+                },
+            ],
+        }
+
+        response = requests.post(webhook_url, json=message, timeout=10)
+        if response.status_code == 200:
+            logger.info("Slack notification sent successfully")
+        else:
+            logger.warning(
+                "Slack notification failed with status %d", response.status_code
+            )
+    except Exception:
+        logger.exception("Failed to send Slack notification")
+
+
+def send_email_notification(delta_df: pd.DataFrame) -> None:
+    """Send email notification when new jobs are found. Silently skips if email config missing."""
+    email_host = os.getenv("EMAIL_HOST")
+    email_port = os.getenv("EMAIL_PORT")
+    email_user = os.getenv("EMAIL_USER")
+    email_password = os.getenv("EMAIL_PASSWORD")
+    email_to = os.getenv("EMAIL_TO")
+
+    if not all([email_host, email_port, email_user, email_password, email_to]):
+        return
+
+    try:
+        num_jobs = len(delta_df)
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        # Get top 5 jobs for preview
+        top_jobs = delta_df.head(5)
+        job_lines = []
+        for _, job in top_jobs.iterrows():
+            title = str(job.get("title", "Unknown Title"))
+            company = str(job.get("company", "Unknown Company"))
+            if company == "Unknown":
+                company = "Unknown Company"
+            job_lines.append(f"  - {title} @ {company}")
+
+        job_list = "\n".join(job_lines)
+        if num_jobs > 5:
+            job_list += f"\n  ... and {num_jobs - 5} more jobs"
+
+        msg = EmailMessage()
+        msg["Subject"] = "New ATS Jobs Detected"
+        msg["From"] = email_user
+        msg["To"] = email_to
+
+        body = f"""New ATS Jobs Found
+
+Number of new jobs: {num_jobs}
+Timestamp: {timestamp}
+
+Top Jobs:
+{job_list}
+
+Full details are available in the delta CSV file:
+{DELTA_CSV_PATH}
+
+---
+ATS Job Scraper
+"""
+        msg.set_content(body)
+
+        port = int(email_port)
+        with smtplib.SMTP(email_host, port) as server:
+            if port == 587:
+                server.starttls()
+            server.login(email_user, email_password)
+            server.send_message(msg)
+
+        logger.info("Email notification sent successfully to %s", email_to)
+    except Exception:
+        logger.exception("Failed to send email notification")
+
+
+# ============================================================================
 # Main Pipeline
 # ============================================================================
 
@@ -703,6 +835,11 @@ def main() -> None:
     print(f"New jobs found: {len(delta_df)}")
     print(f"Master CSV path: {MASTER_CSV_PATH}")
     print(f"Delta CSV path: {DELTA_CSV_PATH}")
+
+    # Step 7: Send notifications if new jobs found
+    if not delta_df.empty:
+        send_slack_notification(delta_df)
+        send_email_notification(delta_df)
 
 
 if __name__ == "__main__":
